@@ -1,0 +1,24 @@
+{
+  "name": "fh-dashboard-automation",
+  "version": "1.0.0",
+  "description": "Code for automating dashboard creation and population through the FireHydrant API",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oegolden/FH-Dashboard-Automation.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/oegolden/FH-Dashboard-Automation/issues"
+  },
+  "homepage": "https://github.com/oegolden/FH-Dashboard-Automation#readme",
+  "dependencies": {
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2"
+  }
+}
