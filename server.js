@@ -1,10 +1,13 @@
 import express from "express";
 import fetch from "node-fetch";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-const FIREHYDRANT_API_KEY = process.env.FH_API_KEY;
+const FIREHYDRANT_API_KEY =  process.env.FIREHYDRANT_API_KEY;
 const FIREHYDRANT_API_BASE = "https://api.firehydrant.io/v1";
 
 // --- Helper: call FireHydrant API ---
@@ -29,36 +32,36 @@ async function fhRequest(endpoint, method = "GET", body = null) {
 // --- Main route ---
 app.post("/attach-status-page", async (req, res) => {
   try {
-    const { incident_id, field_value } = req.body;
-    if (!incident_id || !field_value) {
-      return res.status(400).json({ error: "incident_id and field_value are required." });
+    const { incident_id, company_name,incident_title } = req.body;
+    if (!incident_id || !company_name) {
+      return res.status(400).json({ error: "incident_id and company_name are required." });
     }
-
+    console.log(`Attaching status page '${company_name}' to incident ${incident_id}`);
     // 1️⃣ Get all FireHydrant status pages
-    const pages = await fhRequest("/status_pages");
-
-    // 2️⃣ Find the one matching the field_value (by name)
+    let data = await fhRequest("/nunc_connections");
+    const pages = data.data;
+    console.log("Fetched status pages:", pages);
+    // 2️⃣ Find the one matching the company_name (by name)
     const targetPage = pages.find(
-      p => p.name.toLowerCase() === field_value.toLowerCase()
+      p => p.company_name.toLowerCase() === company_name.toLowerCase()
     );
 
     if (!targetPage) {
-      return res.status(404).json({ error: `No status page found with name '${field_value}'.` });
+      return res.status(404).json({ error: `No status page found with name '${company_name}'.` });
     }
 
-    
 
     // 4️⃣ Add the status page to the incident
     const attachBody = {
-      integration_slug: "nunnc",
-      integration_id: fhIntegration.id,
-      title: `${targetPage.name} – Linked from Incident`,
+      integration_slug: "nunc",
+      integration_id: targetPage.id,
+      title: `${incident_title}`,
     };
-
+    console.log("Attaching status page with body:", attachBody);
     const result = await fhRequest(`/incidents/${incident_id}/status_pages`, "POST", attachBody);
 
     return res.status(201).json({
-      message: `Status page '${targetPage.name}' linked to incident ${incident_id} sett ${}`,
+      message: `Status page '${targetPage.name}' linked to incident ${incident_id}`,
       result
     });
 
