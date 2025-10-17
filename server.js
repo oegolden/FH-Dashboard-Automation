@@ -1,6 +1,5 @@
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
+const express = require("express");
+const dotenv = require("dotenv");
 
 dotenv.config();
 
@@ -36,18 +35,19 @@ app.post("/attach-status-page", async (req, res) => {
     if (!incident_id || !company_name) {
       return res.status(400).json({ error: "incident_id and company_name are required." });
     }
-    console.log(`Attaching status page '${company_name}' to incident ${incident_id}`);
+    const cleaned_name = company_name.replace(/\s/g, ''); 
+    console.log(`Attaching status page '${cleaned_name}' to incident ${incident_id}`);
     // 1️⃣ Get all FireHydrant status pages
     let data = await fhRequest("/nunc_connections");
     const pages = data.data;
     console.log("Fetched status pages:", pages);
     // 2️⃣ Find the one matching the company_name (by name)
     const targetPage = pages.find(
-      p => p.company_name.toLowerCase() === company_name.toLowerCase()
+      p => p.company_name.toLowerCase() === cleaned_name.toLowerCase()
     );
 
     if (!targetPage) {
-      return res.status(404).json({ error: `No status page found with name '${company_name}'.` });
+      return res.status(404).json({ error: `No status page found with name '${cleaned_name}'.` });
     }
 
 
