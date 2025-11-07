@@ -6,9 +6,12 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-const FIREHYDRANT_API_KEY =  process.env.FIREHYDRANT_API_KEY;
+const FIREHYDRANT_API_KEY = process.env.FIREHYDRANT_API_KEY;
 const FIREHYDRANT_API_BASE = "https://api.firehydrant.io/v1";
-
+const ZENDESK_API_KEY = process.env.ZENDESK_API_KEY;
+const ZENDESK_EMAIL = "jwehrle@auditboard.com";
+const ZENDESK_SUBDOMAIN = "soxhub1753473789";
+ 
 // --- Helper: call FireHydrant API ---
 async function fhRequest(endpoint, method = "GET", body = null) {
   const res = await fetch(`${FIREHYDRANT_API_BASE}${endpoint}`, {
@@ -31,7 +34,7 @@ async function fhRequest(endpoint, method = "GET", body = null) {
 // --- Main route ---
 app.post("/attach-status-page", async (req, res) => {
   try {
-    const { incident_id, company_name,incident_title } = req.body;
+    const { incident_id, company_name, incident_title } = req.body;
     if (!incident_id || !company_name) {
       return res.status(400).json({ error: "incident_id and company_name are required." });
     }
@@ -50,7 +53,6 @@ app.post("/attach-status-page", async (req, res) => {
       return res.status(404).json({ error: `No status page found with name '${cleaned_name}'.` });
     }
 
-
     // 4️⃣ Add the status page to the incident
     const attachBody = {
       integration_slug: "nunc",
@@ -63,6 +65,90 @@ app.post("/attach-status-page", async (req, res) => {
     return res.status(201).json({
       message: `Status page '${targetPage.name}' linked to incident ${incident_id}`,
       result
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Push Update to Zendesk Ticket ---
+app.post("/update-zendesk-ticket", async (req, res) => {
+  try {
+    const { ticket_ids, comment_body, author_id } = req.body;
+    
+    if (!ticket_ids || !comment_body) {
+      return res.status(400).json({ error: "ticket_ids and comment_body are required." });
+    }
+
+    // Parse ticket IDs from comma-separated string "49,48,47"
+    const ticketIdArray = ticket_ids.split(',').map(id => id.trim()).filter(id => id);
+
+    if (ticketIdArray.length === 0) {
+      return res.status(400).json({ error: "No valid ticket IDs provided." });
+    }
+
+    console.log(`Updating ${ticketIdArray.length} Zendesk ticket(s): ${ticketIdArray.join(', ')}`);
+
+    // Prepare the authentication credentials
+    const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
+
+    // Prepare the ticket update body
+    const updateBody = {
+      ticket: {
+        comment: {
+          body: comment_body,
+          ...(author_id && { author_id }),
+          public: true
+        }
+      }
+    };
+
+    // Update all tickets
+    const results = [];
+    const errors = [];
+
+    for (const ticketId of ticketIdArray) {
+      try {
+        const response = await fetch(
+          `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Basic ${auth}`
+            },
+            body: JSON.stringify(updateBody)
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          errors.push({ ticket_id: ticketId, error: `${response.status}: ${errorText}` });
+        } else {
+          const result = await response.json();
+          results.push({ ticket_id: ticketId, success: true, data: result });
+        }
+      } catch (err) {
+        errors.push({ ticket_id: ticketId, error: err.message });
+      }
+    }
+
+    // Return summary of results
+    const responseData = {
+      total: ticketIdArray.length,
+      successful: results.length,
+      failed: errors.length,
+      results,
+      ...(errors.length > 0 && { errors })
+    };
+
+    const statusCode = errors.length === ticketIdArray.length ? 500 : 200;
+
+    return res.status(statusCode).json({
+      message: `Updated ${results.length} of ${ticketIdArray.length} ticket(s)`,
+      ...responseData
     });
 
   } catch (err) {
