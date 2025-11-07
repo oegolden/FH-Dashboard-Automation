@@ -73,6 +73,7 @@ app.post("/attach-status-page", async (req, res) => {
   }
 });
 
+
 // --- Push Update to Zendesk Ticket ---
 app.post("/update-zendesk-ticket", async (req, res) => {
   try {
@@ -99,8 +100,8 @@ app.post("/update-zendesk-ticket", async (req, res) => {
       ticket: {
         comment: {
           body: comment_body,
-          ...(author_id && { author_id }),
-          public: true
+          public: true,
+          ...(author_id && { author_id })
         }
       }
     };
@@ -109,8 +110,11 @@ app.post("/update-zendesk-ticket", async (req, res) => {
     const results = [];
     const errors = [];
 
+    console.log('Update body:', JSON.stringify(updateBody, null, 2));
+
     for (const ticketId of ticketIdArray) {
       try {
+        console.log(`Attempting to update ticket ${ticketId}...`);
         const response = await fetch(
           `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`,
           {
@@ -125,12 +129,15 @@ app.post("/update-zendesk-ticket", async (req, res) => {
 
         if (!response.ok) {
           const errorText = await response.text();
+          console.error(`Ticket ${ticketId} failed:`, response.status, errorText);
           errors.push({ ticket_id: ticketId, error: `${response.status}: ${errorText}` });
         } else {
           const result = await response.json();
+          console.log(`Ticket ${ticketId} updated successfully`);
           results.push({ ticket_id: ticketId, success: true, data: result });
         }
       } catch (err) {
+        console.error(`Ticket ${ticketId} exception:`, err);
         errors.push({ ticket_id: ticketId, error: err.message });
       }
     }
