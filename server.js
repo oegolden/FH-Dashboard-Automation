@@ -11,7 +11,7 @@ const FIREHYDRANT_API_BASE = "https://api.firehydrant.io/v1";
 const ZENDESK_API_KEY = process.env.ZENDESK_API_KEY;
 const ZENDESK_EMAIL = "jwehrle@auditboard.com";
 const ZENDESK_SUBDOMAIN = "soxhub1753473789";
- 
+
 // --- Helper: call FireHydrant API ---
 async function fhRequest(endpoint, method = "GET", body = null) {
   const res = await fetch(`${FIREHYDRANT_API_BASE}${endpoint}`, {
@@ -38,7 +38,7 @@ app.post("/attach-status-page", async (req, res) => {
     if (!incident_id || !company_name) {
       return res.status(400).json({ error: "incident_id and company_name are required." });
     }
-    const cleaned_name = company_name.replace(/\s/g, ''); 
+    const cleaned_name = company_name.replace(/\s/g, '');
     console.log(`Attaching status page '${cleaned_name}' to incident ${incident_id}`);
     // 1️⃣ Get all FireHydrant status pages
     let data = await fhRequest("/nunc_connections");
@@ -77,8 +77,8 @@ app.post("/attach-status-page", async (req, res) => {
 // --- Push Update to Zendesk Ticket ---
 app.post("/update-zendesk-ticket", async (req, res) => {
   try {
-    const { ticket_ids, comment_body, author_id } = req.body;
-    
+    const { ticket_ids, comment_body } = req.body;
+
     if (!ticket_ids || !comment_body) {
       return res.status(400).json({ error: "ticket_ids and comment_body are required." });
     }
@@ -92,27 +92,37 @@ app.post("/update-zendesk-ticket", async (req, res) => {
 
     console.log(`Updating ${ticketIdArray.length} Zendesk ticket(s): ${ticketIdArray.join(', ')}`);
 
-    // Prepare the authentication credentials
-    const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
-
-    // Prepare the ticket update body
-    const updateBody = {
-      ticket: {
-        comment: {
-          body: comment_body,
-          public: true,
-          ...(author_id && { author_id })
-        }
-      }
-    };
 
     // Update all tickets
     const results = [];
     const errors = [];
 
-    console.log('Update body:', JSON.stringify(updateBody, null, 2));
-
     for (const ticketId of ticketIdArray) {
+      // Prepare the authentication credentials
+      const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
+      
+      const ticket = await fetch(
+        `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Basic ${auth}`
+          }
+        }  
+      );
+      const author_id = ticket.json().assignee_id;
+      // Prepare the ticket update body
+      const updateBody = {
+        ticket: {
+          comment: {
+            body: comment_body,
+            public: true,
+            ...(author_id && { author_id })
+          }
+        }
+      }
+
       try {
         console.log(`Attempting to update ticket ${ticketId}...`);
         const response = await fetch(
