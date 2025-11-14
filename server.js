@@ -77,7 +77,8 @@ app.post("/attach-status-page", async (req, res) => {
 // --- Push Update to Zendesk Ticket ---
 app.post("/update-zendesk-ticket", async (req, res) => {
   try {
-    const { ticket_ids, comment_body } = req.body;
+    console.log(req.body.data.payload);
+    const { ticket_ids, comment_body } = req.body.data.payload;
 
     if (!ticket_ids || !comment_body) {
       return res.status(400).json({ error: "ticket_ids and comment_body are required." });
@@ -122,7 +123,7 @@ app.post("/update-zendesk-ticket", async (req, res) => {
           }
         }
       }
-
+      //await slack confitrmation
       try {
         console.log(`Attempting to update ticket ${ticketId}...`);
         const response = await fetch(
@@ -151,7 +152,8 @@ app.post("/update-zendesk-ticket", async (req, res) => {
         errors.push({ ticket_id: ticketId, error: err.message });
       }
     }
-
+    
+    /** =
     // Return summary of results
     const responseData = {
       total: ticketIdArray.length,
@@ -160,12 +162,11 @@ app.post("/update-zendesk-ticket", async (req, res) => {
       results,
       ...(errors.length > 0 && { errors })
     };
-
+    */
     const statusCode = errors.length === ticketIdArray.length ? 500 : 200;
 
     return res.status(statusCode).json({
-      message: `Updated ${results.length} of ${ticketIdArray.length} ticket(s)`,
-      ...responseData
+      message: `Updated ${results.length} of ${ticketIdArray.length} ticket(s)`
     });
 
   } catch (err) {
