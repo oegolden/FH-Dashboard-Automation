@@ -1,6 +1,6 @@
 const express = require("express");
 const dotenv = require("dotenv");
-
+const { WebClient, LogLevel } = require("@slack/web-api");
 dotenv.config();
 
 const app = express();
@@ -11,6 +11,12 @@ const FIREHYDRANT_API_BASE = "https://api.firehydrant.io/v1";
 const ZENDESK_API_KEY = process.env.ZENDESK_API_KEY;
 const ZENDESK_EMAIL = "jwehrle@auditboard.com";
 const ZENDESK_SUBDOMAIN = "soxhub1753473789";
+const SLACK_BOT_TOKEN = process.env.Slack_BOT_TOKEN;
+
+const client = new WebClient(SLACK_BOT_TOKEN, {
+  // LogLevel can be imported and used to make debugging simpler
+  logLevel: LogLevel.DEBUG
+});
 
 // --- Helper: call FireHydrant API ---
 async function fhRequest(endpoint, method = "GET", body = null) {
@@ -38,7 +44,7 @@ app.post("/attach-status-page", async (req, res) => {
     if (!incident_id || !company_name) {
       return res.status(400).json({ error: "incident_id and company_name are required." });
     }
-    const cleaned_name = company_name.replace(/\s/g, '');
+    const cleaned_name = company_name.replace(/\s/g, ''); 
     console.log(`Attaching status page '${cleaned_name}' to incident ${incident_id}`);
     // 1️⃣ Get all FireHydrant status pages
     let data = await fhRequest("/nunc_connections");
@@ -77,9 +83,8 @@ app.post("/attach-status-page", async (req, res) => {
 // --- Push Update to Zendesk Ticket ---
 app.post("/update-zendesk-ticket", async (req, res) => {
   try {
-    console.log(req.body.data.payload);
-    const { ticket_ids, comment_body } = req.body.data.payload;
-
+    const { ticket_ids, comment_body, author_id } = req.body;
+    
     if (!ticket_ids || !comment_body) {
       return res.status(400).json({ error: "ticket_ids and comment_body are required." });
     }
@@ -93,37 +98,27 @@ app.post("/update-zendesk-ticket", async (req, res) => {
 
     console.log(`Updating ${ticketIdArray.length} Zendesk ticket(s): ${ticketIdArray.join(', ')}`);
 
+    // Prepare the authentication credentials
+    const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
+
+    // Prepare the ticket update body
+    const updateBody = {
+      ticket: {
+        comment: {
+          body: comment_body,
+          public: true,
+          ...(author_id && { author_id })
+        }
+      }
+    };
 
     // Update all tickets
     const results = [];
     const errors = [];
 
+    console.log('Update body:', JSON.stringify(updateBody, null, 2));
+
     for (const ticketId of ticketIdArray) {
-      // Prepare the authentication credentials
-      const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
-      
-      const ticket = await fetch(
-        `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Basic ${auth}`
-          }
-        }  
-      );
-      const author_id = ticket.json().assignee_id;
-      // Prepare the ticket update body
-      const updateBody = {
-        ticket: {
-          comment: {
-            body: comment_body,
-            public: true,
-            ...(author_id && { author_id })
-          }
-        }
-      }
-      //await slack confitrmation
       try {
         console.log(`Attempting to update ticket ${ticketId}...`);
         const response = await fetch(
@@ -152,8 +147,7 @@ app.post("/update-zendesk-ticket", async (req, res) => {
         errors.push({ ticket_id: ticketId, error: err.message });
       }
     }
-    
-    /** =
+
     // Return summary of results
     const responseData = {
       total: ticketIdArray.length,
@@ -162,11 +156,12 @@ app.post("/update-zendesk-ticket", async (req, res) => {
       results,
       ...(errors.length > 0 && { errors })
     };
-    */
+
     const statusCode = errors.length === ticketIdArray.length ? 500 : 200;
 
     return res.status(statusCode).json({
-      message: `Updated ${results.length} of ${ticketIdArray.length} ticket(s)`
+      message: `Updated ${results.length} of ${ticketIdArray.length} ticket(s)`,
+      ...responseData
     });
 
   } catch (err) {
@@ -175,6 +170,65 @@ app.post("/update-zendesk-ticket", async (req, res) => {
   }
 });
 
+
+// Post a message to a channel your app is in using ID and message text
+async function publishMessage(id, text) {
+  try {
+    // Call the chat.postMessage method using the built-in WebClient
+    const result = await app.client.chat.postMessage({
+      // The token you used to initialize your app
+      token: process.env.Slack_BOT_TOKEN,
+      channel: id,
+      text: text
+      // You could also use a blocks[] array to send richer content
+    });
+
+    // Print result, which includes information about the message (like TS)
+    console.log(result);
+  }
+  catch (error) {
+    console.error(error);
+  }
+}
+
+
+app.post("/send-update-message", async (req, res) => {
+  try {
+    //iterate over ticket ids and get owner id for each ticket
+    const { ticket_ids, updateBody } = req.body;
+      for (const ticket_id of ticket_ids) {
+        const ticket = await fetch(
+          `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticket_id}`,
+           {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Basic ${auth}`
+            },
+            body: JSON.stringify(updateBody)
+          }
+        );
+        console.log(`Sending message to Slack channel '${owner_id}'`);
+        const owner_email = ticket.assignee_email;
+        const slack_response = await client.users.lookupByEmail(
+          {
+            email: owner_email
+          }
+        );
+        if (slack_response.ok) {
+          const owner_id = slack_response.user.id;
+          await publishMessage(owner_id, updateBody);
+        } else {
+          await publishMessage(U09DZTJGRBJ, updateBody); //fallback to otis user id for presentation on 12/5/2025
+        }
+      //send the FH update message including ai incident summary to the ticket owner via slack
+      return res.status(200).json({ message: `Message sent to channel '${channel_id}'` });
+      }
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
