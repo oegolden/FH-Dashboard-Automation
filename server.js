@@ -12,6 +12,7 @@ const ZENDESK_API_KEY = process.env.ZENDESK_API_KEY;
 const ZENDESK_EMAIL = "jwehrle@auditboard.com";
 const ZENDESK_SUBDOMAIN = "soxhub1753473789";
 const SLACK_BOT_TOKEN = process.env.Slack_BOT_TOKEN;
+const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
 
 const client = new WebClient(SLACK_BOT_TOKEN, {
   // LogLevel can be imported and used to make debugging simpler
@@ -83,8 +84,10 @@ app.post("/attach-status-page", async (req, res) => {
 // --- Push Update to Zendesk Ticket ---
 app.post("/update-zendesk-ticket", async (req, res) => {
   try {
-    const { ticket_ids, comment_body, author_id } = req.body;
-    
+    console.log(req.body);
+    const { incident_id, comment_body,view} = JSON.parse(req.body.data.payload);
+    const incident = await fhRequest(`/incidents/${incident_id}`);
+    const ticket_ids = incident.custom_fields.find(field => field.display_name === "Zendesk Ticket IDs")?.value;
     if (!ticket_ids || !comment_body) {
       return res.status(400).json({ error: "ticket_ids and comment_body are required." });
     }
@@ -99,14 +102,13 @@ app.post("/update-zendesk-ticket", async (req, res) => {
     console.log(`Updating ${ticketIdArray.length} Zendesk ticket(s): ${ticketIdArray.join(', ')}`);
 
     // Prepare the authentication credentials
-    const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
 
     // Prepare the ticket update body
     const updateBody = {
       ticket: {
         comment: {
           body: comment_body,
-          public: true,
+          public: view,
           ...(author_id && { author_id })
         }
       }
@@ -175,7 +177,7 @@ app.post("/update-zendesk-ticket", async (req, res) => {
 async function publishMessage(id, text) {
   try {
     // Call the chat.postMessage method using the built-in WebClient
-    const result = await app.client.chat.postMessage({
+    const result = await client.chat.postMessage({
       // The token you used to initialize your app
       token: process.env.Slack_BOT_TOKEN,
       channel: id,
@@ -195,8 +197,11 @@ async function publishMessage(id, text) {
 app.post("/send-update-message", async (req, res) => {
   try {
     //iterate over ticket ids and get owner id for each ticket
-    const { ticket_ids, updateBody } = req.body;
-      for (const ticket_id of ticket_ids) {
+    var { ticket_ids, updateBody } = req.body;
+    console.log(ticket_ids)
+    ticket_ids = ticket_ids.toString();
+    const ticketIdArray = ticket_ids.split(',').map(id => id.trim()).filter(id => id);
+      for (const ticket_id of ticketIdArray) {
         const ticket = await fetch(
           `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticket_id}`,
            {
@@ -204,25 +209,23 @@ app.post("/send-update-message", async (req, res) => {
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Basic ${auth}`
-            },
-            body: JSON.stringify(updateBody)
+            }
           }
         );
-        console.log(`Sending message to Slack channel '${owner_id}'`);
         const owner_email = ticket.assignee_email;
-        const slack_response = await client.users.lookupByEmail(
-          {
-            email: owner_email
-          }
-        );
-        if (slack_response.ok) {
-          const owner_id = slack_response.user.id;
-          await publishMessage(owner_id, updateBody);
-        } else {
-          await publishMessage(U09DZTJGRBJ, updateBody); //fallback to otis user id for presentation on 12/5/2025
+        try{
+          const slack_response = await client.users.lookupByEmail(
+            {
+              email: owner_email
+            }
+          );
+            const owner_id = slack_response.user.id;
+            await publishMessage(owner_id, updateBody);
+        } catch (error) {
+          await publishMessage("U09DZTJGRBJ", updateBody); //fallback to otis user id for presentation on 12/5/2025
         }
       //send the FH update message including ai incident summary to the ticket owner via slack
-      return res.status(200).json({ message: `Message sent to channel '${channel_id}'` });
+      return res.status(200).json({ message: `Message sent to channel '${owner_email}'` });
       }
     } catch (err) {
       console.error(err);
